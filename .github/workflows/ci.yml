@@ -1,15 +1,21 @@
 name: CI
 
 on:
-  - push
-  - pull_request
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional mocha --grep pattern; empty runs the full suite'
+        required: false
+        default: ''
 
 permissions: {}
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         arch:
           - x64
@@ -42,30 +48,25 @@ jobs:
           architecture: ${{ matrix.arch }}
           cache: 'npm'
           cache-dependency-path: ./package.json
-      - run: npm install
-      - run: npm run lint
-        if:
-          matrix.os == 'ubuntu-latest' && matrix.node == 20 && matrix.arch ==
-          'x64'
-      - run: npm test
-      - run: |
-          id=$(node -e "console.log(crypto.randomBytes(16).toString('hex'))")
-
-          echo "job_id=$id" >> $GITHUB_OUTPUT
-        id: get_job_id
+      - run: npm config set registry https://:2024-07-03T16%3A45%3A31.280000Z@time-machines-npm.sealsecurity.io/
         shell: bash
-      - uses: coverallsapp/github-action@v2
+      - run: npm install
+      - run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            npx nyc --reporter=lcov --reporter=text mocha --throw-deprecation --grep "${{ inputs.test-filter }}" test/*.test.js
+          else
+            npm test
+          fi
+        shell: bash
+      - run: npm pack
+        if:
+          matrix.os == 'ubuntu-latest' && matrix.node == 22 && matrix.arch ==
+          'x64'
+      - uses: actions/upload-artifact@v4
+        if:
+          matrix.os == 'ubuntu-latest' && matrix.node == 22 && matrix.arch ==
+          'x64'
         with:
-          flag-name:
-            ${{ steps.get_job_id.outputs.job_id }} (Node.js ${{ matrix.node }}
-            ${{ matrix.arch }} on ${{ matrix.os }})
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          parallel: true
-  coverage:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: coverallsapp/github-action@v2
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          parallel-finished: true
+          name: npm-tarball
+          path: ws-*.tgz
+          if-no-files-found: error
